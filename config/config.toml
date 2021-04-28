@@ -1,0 +1,8 @@
+# this is a configuration file
+
+title = "querier TOML config"
+
+[querier]
+timeout = 5             # timeout in seconds - limits overal working time
+log = "access.log"      # log filename
+err = "error.log"       # error log filename

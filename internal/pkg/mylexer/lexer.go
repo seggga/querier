@@ -14,6 +14,16 @@ type Lexemma struct {
 	Tok string
 }
 
+func (l *Lexemma) isOperator() bool {
+	switch {
+	case l.Tok == "and", l.Tok == "or":
+		return true
+	case l.Tok == ">=", l.Tok == "<=", l.Tok == "==", l.Tok == ">", l.Tok == "<":
+		return true
+	}
+	return false
+}
+
 type LexMachine struct {
 	state  int
 	Select []string  // набор выбранных столбцов в пользовательском запросе (блок SELECT)
@@ -96,7 +106,7 @@ func TrimOutput(allColumns []string, b []byte) []string {
 	return outColumns
 }
 
-func CheckSelectedColumns(s []string, lm LexMachine) error {
+func CheckSelectedColumns(s []string, lm *LexMachine) error {
 	// check SELECT statement
 	counter := len(lm.Select)
 	for _, colInQuery := range lm.Select {
@@ -111,16 +121,25 @@ func CheckSelectedColumns(s []string, lm LexMachine) error {
 		return errors.New("Набор столбцов в запросе (секция SELECT) не соответствует именам столбцов в файле")
 	}
 
+	// extract colunms frome WHERE statement
+	var colsInWhere []string
+	for _, colInQuery := range lm.Where {
+		if colInQuery.Tok == "IDENT" {
+			colsInWhere = append(colsInWhere, colInQuery.Lex)
+		}
+	}
+
 	// check WHERE statement
-	counter = len(lm.Where)
-	for i := 0; i < len(lm.Where); i += 4 { //подход не учитывает скобки. Надо исправлять
+	counter = len(colsInWhere)
+	for _, colInQuery := range colsInWhere {
 		for _, colInTable := range s {
-			if lm.Where[i].Tok == colInTable {
+			if colInQuery == colInTable {
 				counter--
 				break
 			}
 		}
 	}
+
 	if counter > 0 {
 		return errors.New("Набор столбцов в запросе (секция WHERE) не соответствует именам столбцов в файле")
 	}
@@ -131,19 +150,18 @@ func CheckSelectedColumns(s []string, lm LexMachine) error {
 
 // CheckQueryPattern - checks the query pattern
 // if there is no matcing pattern, the query is incorrect
-func CheckQueryPattern(b []byte) bool {
+func CheckQueryPattern(query string) bool {
 
-	theQuery := string(b)
-	theQuery = strings.ToLower(theQuery)
-	theQuery = strings.TrimSpace(theQuery)
+	query = strings.ToLower(query)
+	query = strings.TrimSpace(query)
 
 	// проверка на первый key_word
-	if !strings.HasPrefix(theQuery, "select") {
+	if !strings.HasPrefix(query, "select") {
 		return false
 	}
 
 	for _, patt := range QueryPatterns {
-		matched, _ := regexp.Match(patt, []byte(theQuery))
+		matched, _ := regexp.Match(patt, []byte(query))
 		if matched {
 			return true // также надо запомнить, какой паттерн подошел
 		}
@@ -168,15 +186,11 @@ func Execute(sl []Lexemma) bool {
 		// финальное вычисление ??
 		if i+3 >= len(sl) {
 			res := calculator(sl[i : i+3])
-			fmt.Println(sl)
-			if res.Tok == "true" {
-				return true
-			}
-			return false
+			return res.Lex == "true"
 		}
 		// нефинальное вычисление
 		sl = append(sl, calculator(sl[i:i+3]))
-		if sl[i+3].Lex == "operator" {
+		if sl[i+3].isOperator() {
 			sl = append(sl, sl[i+3])
 		} else {
 			i -= 1
@@ -188,7 +202,7 @@ func Execute(sl []Lexemma) bool {
 func calculator(ops []Lexemma) Lexemma {
 
 	for i, op := range ops {
-		if op.Lex == "operator" {
+		if op.isOperator() {
 			return calculate(i, ops)
 		}
 	}
@@ -214,29 +228,29 @@ func calculate(i int, ops []Lexemma) Lexemma {
 	var result bool
 	switch ops[i].Tok {
 	case ">":
-		result = operand1.Tok > operand2.Tok
+		result = operand1.Lex > operand2.Lex
 	case ">=":
-		result = operand1.Tok >= operand2.Tok
+		result = operand1.Lex >= operand2.Lex
 	case "==":
-		result = operand1.Tok == operand2.Tok
+		result = operand1.Lex == operand2.Lex
 	case "<":
-		result = operand1.Tok < operand2.Tok
+		result = operand1.Lex < operand2.Lex
 	case "<=":
-		result = operand1.Tok <= operand2.Tok
+		result = operand1.Lex <= operand2.Lex
 	case "and":
-		result = (operand1.Tok == "true") && (operand2.Tok == "true")
+		result = (operand1.Lex == "true") && (operand2.Lex == "true")
 	case "or":
-		result = (operand1.Tok == "true") || (operand2.Tok == "true")
+		result = (operand1.Lex == "true") || (operand2.Lex == "true")
 	}
 
 	if result {
-		return Lexemma{"bool", "true"}
+		return Lexemma{Lex: "true", Tok: "bool"}
 	}
-	return Lexemma{"bool", "false"}
+	return Lexemma{Lex: "false", Tok: "bool"}
 }
 
 // FillTheMap constructs the map for mapping column-name => current value from the given row of csv-file
-func FillTheMap(fileCols, row []string, lm LexMachine) map[string]string {
+func FillTheMap(fileCols, row []string, lm *LexMachine) map[string]string {
 
 	// the output map will contain pairs 'fieldName' -> 'fieldValue' from the current row of CSV-file
 	mapSize := len(lm.Select) + len(lm.Where)/3
@@ -251,31 +265,37 @@ func FillTheMap(fileCols, row []string, lm LexMachine) map[string]string {
 		}
 	}
 	// add WHERE-data to the output map
-	for i := 0; i < len(lm.Where); i += 4 { //подход не учитывает скобки. Надо исправлять
+	for _, lexemma := range lm.Where { //подход не учитывает скобки. Надо исправлять
+		if lexemma.Tok != "IDENT" {
+			continue
+		}
 		for j := 0; j < len(fileCols); j += 1 {
-			if lm.Where[i].Tok == fileCols[j] {
-				rowData[lm.Where[i].Tok] = row[j]
+			if lexemma.Lex == fileCols[j] {
+				rowData[lexemma.Lex] = row[j]
 			}
 		}
 	}
-
 	return rowData
 }
 
-func MakeSlice(rowData map[string]string, lm LexMachine) []Lexemma {
+func MakeSlice(rowData map[string]string, lm *LexMachine) []Lexemma {
 
-	lexSlice := make([]Lexemma, len(lm.Where))
+	var lexSlice []Lexemma
 
-	for _, lex := range lm.Where {
-		if lex.Lex == "IDENT" {
-			lex.Tok = rowData[lex.Tok]
-			lexSlice = append(lexSlice, lex)
+	for _, lexemma := range lm.Where {
+		switch lexemma.Tok {
+		case "IDENT":
+			lexemma.Lex = rowData[lexemma.Lex] // change the Lex field of current lexemma (column's name) with it's actual value (from rowData)
+		case ";":
+			continue // final symbol EOF - no need to append
 		}
+		lexSlice = append(lexSlice, lexemma)
 	}
-	return nil
+
+	return lexSlice
 }
 
-func PrintTheRow(rowData map[string]string, lm LexMachine) error {
+func PrintTheRow(rowData map[string]string, lm *LexMachine) error {
 
 	for _, fieldName := range lm.Select {
 		fmt.Printf("%s\t", rowData[fieldName])
@@ -283,103 +303,3 @@ func PrintTheRow(rowData map[string]string, lm LexMachine) error {
 	fmt.Println()
 	return nil
 }
-
-/*
- slice += execute(slice[i], slice[i+1], slice[i+2])  // внутри функции идет проверка ситуации, есть ли четвертый элемент в группе.
- //если четвертого в группе нет, значит это финальное вычисление
- if slice[i+3] isOperator {
-	 slice += slice[i+3]
- } else { // закончились операторы второго уровня
-	i--
- }
-	return false
-}
-
-/*   age >= 30 AND region=="Europe" OR status == "sick"
-
-1) сформировать слайс операндов и действий с ними и выполнять по 3
-
-
-age, >=, 30, AND, | region, ==, europe, AND, | status, ==, sick, | true, AND, false, AND, | true | false AND  >= false
-
-===================================
-
-/*   age >= 30 AND region=="Europe"
-
-age, >=, 30, AND, | region, ==, europe | true, AND, false, | false
-
-====================================
-
-for i := 0; i < len(operators); i += 4
-
- slice += execute(slice[i], slice[i+1], slice[i+2])  // внутри функции идет проверка ситуации, есть ли четвертый элемент в группе.
- //если четвертого в группе нет, значит это финальное вычисление
- if slice[i+3] isOperator {
-	 slice += slice[i+3]
- } else { // закончились операторы второго уровня
-	i--
- }
-
-if slice[len(slice)] -> print the string
-
-/*
-
-
-1) age >= 30 region == "europe" status == "sick"
-2) result1 AND result2 AND result3
-в перенос AND на позицию 7 - еще перенос на позицию +4 = 11
-второй перенос AND на позицию
-
-	lexerOut := []struct{
-		lexType columnName / condition / value / operator /
-		lexText string
-		lexPriority int //
-		resultPriority int // для condition
-
-				columnName - 0
-				condition - 1
-				value - 0
-				operator - 2
-
-col - age - 0
-cond - >= - 1
-val - 30 - 0
-
-
-for trippleToken = range trippleTokens {
-
-
-}
-
-1)
-func exec (token1, condition, token3 ) token {
-	if condition == ">=" {
-		return token1 >= token3
-	}
-
-	if condition == "==" {
-		return token1 == token3
-	}
-
-	if condition == "AND" {
-		return token AND token
-	}
-}
-
-
-call[0]
-call[1]
-call[2]
-
-
-equation = GOE(col, val)
-
-
-
-	}
-
-
-
-	return nil
-}
-*/
