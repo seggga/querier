@@ -42,7 +42,7 @@ func fillLexMachine(query string) (*mylexer.LexMachine, error) {
 	}
 
 	// check if the query contains at least one column to be written to output
-	if len(lm.From) == 0 {
+	if len(lm.Select) == 0 {
 		err := errors.New("no columns has been chosen (section SELECT is empty)")
 		return nil, err
 	}
