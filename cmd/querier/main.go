@@ -10,6 +10,7 @@ import (
 
 	"github.com/seggga/querier/config"
 	"github.com/seggga/querier/internal/app/csvreader"
+	"github.com/sirupsen/logrus"
 )
 
 func main() {
@@ -19,7 +20,37 @@ func main() {
 		panic(err)
 	}
 
-	//fmt.Println(config)
+	// initialize info logger
+	logInfo := logrus.New()
+	fileInfo, err := os.OpenFile(config.Log, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer fileInfo.Close()
+
+	logInfo.SetLevel(logrus.InfoLevel)
+	logInfo.SetFormatter(&logrus.JSONFormatter{})
+	logInfo.SetOutput(fileInfo)
+	logInfo.Info("logging started")
+	logInfo.Info("command-line parameters:")
+	logInfo.Infof("timeout: %s", config.Timeout)
+	logInfo.Infof("log-file: %t", config.Log)
+	logInfo.Infof("error-file: %s", config.Err)
+
+	// initialize error logger
+	logErr := logrus.New()
+	fileErr, err := os.OpenFile(config.Err, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer fileErr.Close()
+
+	logErr.SetLevel(logrus.ErrorLevel)
+	logErr.SetFormatter(&logrus.JSONFormatter{})
+	logErr.SetOutput(fileErr)
+	logErr.Info("logging started")
 
 	// load users query
 	if len(os.Args) < 2 {
