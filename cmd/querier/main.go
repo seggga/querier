@@ -1,9 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"time"
@@ -53,15 +53,19 @@ func main() {
 	logErr.Info("logging started")
 
 	// load users query
-	if len(os.Args) < 2 {
-		log.Fatal("no query has been passed")
+	fmt.Println("Please, enter the query : ")
+	reader := bufio.NewReader(os.Stdin)
+	query, err := reader.ReadString('\n')
+	if err != nil {
+		logErr.Errorf("There is an error entering data.\n%v\n", err)
+		return
 	}
-	query := os.Args[1]
+	logInfo.Infof("user's query is: %s", query)
 
 	// check the query and create a LexMachine
 	lm, err := fillLexMachine(query)
 	if err != nil {
-		fmt.Println(err)
+		logErr.Errorln(err)
 		return
 	}
 
@@ -77,9 +81,9 @@ func main() {
 	// ctx.cancel function  will be called on INTERRUPT signal or after timeout defined by config
 	select {
 	case <-intChan:
-		fmt.Println("Program has been interrupted by user")
+		logInfo.Println("Program has been interrupted by user")
 	case <-timeOuter.C:
-		fmt.Println("there is no time left")
+		logInfo.Println("there is no time left")
 	}
 	cancel()
 
@@ -87,8 +91,8 @@ func main() {
 	timeOuter = time.NewTimer(time.Second * 3)
 	select {
 	case <-finishChan:
-		fmt.Println("all csv-files has been successfully closed")
+		logInfo.Println("all csv-files has been successfully closed")
 	case <-timeOuter.C:
-		fmt.Println("some csv-files has not been closed")
+		logInfo.Println("some csv-files has not been closed")
 	}
 }
