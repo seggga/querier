@@ -2,10 +2,10 @@ name: Build and Test
 on:
   push:
     branches:
-      - new-branch
+      - log
   pull_request:
     branches:
-      - new-branch
+      - log
 
 jobs:
 # LINT - workflow
