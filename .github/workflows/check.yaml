@@ -1,7 +1,5 @@
 name: check and Test
 on: [push, pull_request]
-    branches:
-      - log
 
 jobs:
 # LINT - workflow
